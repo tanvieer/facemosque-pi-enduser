@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = REPO_ROOT / ".env"
@@ -96,6 +96,13 @@ class Config:
         def optional(key: str, default: str = "") -> str:
             return os.environ.get(key, file_values.get(key, default)).strip()
 
+        def as_int(key: str, default: str | None = None) -> int:
+            raw = get(key, default)
+            try:
+                return int(raw.strip())
+            except ValueError:
+                raise RuntimeError(f"{key} must be a whole number, got {raw!r}") from None
+
         def resolve(raw: str) -> Path:
             path = Path(raw).expanduser()
             return path if path.is_absolute() else (REPO_ROOT / path)
@@ -122,11 +129,29 @@ class Config:
                 "BT_SINK_MAC is empty — run `./adhanctl pair` to select a speaker"
             )
 
+        # These four have no fallback, and are read in the order .env lists them
+        # so someone who has filled in nothing is told about the first blank
+        # rather than the last. MOSQUE_ID and TIMEZONE in particular belong to
+        # the installation, not to the code: guessing either one plays the adhan
+        # at the wrong time and says nothing about it.
+        base_url = get("EXPO_PUBLIC_API_BASE_URL").rstrip("/")
+        api_key = get("EXPO_PUBLIC_API_KEY")
+        mosque_id = as_int("MOSQUE_ID")
+
+        zone_name = get("TIMEZONE")
+        try:
+            timezone = ZoneInfo(zone_name)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise RuntimeError(
+                f"TIMEZONE={zone_name!r} is not an IANA zone "
+                "(e.g. Europe/Berlin, Asia/Dhaka)"
+            ) from None
+
         return cls(
-            base_url=get("EXPO_PUBLIC_API_BASE_URL").rstrip("/"),
-            api_key=get("EXPO_PUBLIC_API_KEY"),
-            mosque_id=int(get("MOSQUE_ID", "4")),
-            timezone=ZoneInfo(get("TIMEZONE", "Europe/Berlin")),
+            base_url=base_url,
+            api_key=api_key,
+            mosque_id=mosque_id,
+            timezone=timezone,
             audio_path=audio_path,
             audio_path_fajr=audio_path_fajr,
             bt_sink_mac=bt_mac,
@@ -135,13 +160,13 @@ class Config:
             # local WeMo devices, so the listener would just idle. See README.
             alexa_enabled=_as_bool(get("ALEXA_ENABLED", "false")),
             alexa_device_name=optional("ALEXA_DEVICE_NAME", "Adhan"),
-            alexa_port=int(get("ALEXA_PORT", "52000")),
+            alexa_port=as_int("ALEXA_PORT", "52000"),
             state_dir=Path(
                 get("STATE_DIR", str(Path.home() / ".local/state/adhan"))
             ).expanduser(),
             prayers=prayers,
-            schedule_days=int(get("SCHEDULE_DAYS", "30")),
-            refresh_interval_days=int(get("REFRESH_INTERVAL_DAYS", "3")),
+            schedule_days=as_int("SCHEDULE_DAYS", "30"),
+            refresh_interval_days=as_int("REFRESH_INTERVAL_DAYS", "3"),
             warnings=tuple(warnings),
         )
 

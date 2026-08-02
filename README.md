@@ -76,6 +76,9 @@ You need three things: `EXPO_PUBLIC_API_KEY`, `MOSQUE_ID`, and `TIMEZONE`.
 Everything else already has a sensible default. Save with `Ctrl-O`, exit with
 `Ctrl-X`.
 
+None of the three is guessed for you. Leave one blank and the service refuses
+to start and names it — better than quietly playing another city's times.
+
 To find your mosque id, ask the API (it is a plain numeric id — slugs are
 rejected):
 
@@ -166,8 +169,8 @@ list with comments.
 | Key | Meaning |
 | --- | --- |
 | `EXPO_PUBLIC_API_KEY` | Facemosque visitor key **(required)** |
-| `MOSQUE_ID` | Numeric id. The API rejects slugs. |
-| `TIMEZONE` | IANA zone, e.g. `Europe/Berlin` |
+| `MOSQUE_ID` | Numeric id — the API rejects slugs **(required)** |
+| `TIMEZONE` | IANA zone, e.g. `Europe/Berlin` **(required)** |
 | `AUDIO_PATH` | Any format ffmpeg reads |
 | `AUDIO_PATH_FAJR` | Optional separate Fajr adhan |
 | `BT_SINK_MAC` | Written for you by `./adhanctl pair` |
