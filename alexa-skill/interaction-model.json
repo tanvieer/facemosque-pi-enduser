@@ -1,7 +1,7 @@
 {
   "interactionModel": {
     "languageModel": {
-      "invocationName": "my mosque",
+      "invocationName": "mosque",
       "modelConfiguration": {
         "fallbackIntentSensitivity": {
           "level": "LOW"
@@ -32,18 +32,25 @@
           "name": "NextPrayerIntent",
           "slots": [],
           "samples": [
+            "next",
+            "next one",
+            "next prayer",
+            "next prayer time",
+            "next adhan",
+            "next azan",
+            "next ajan",
+            "next salah",
+            "next namaz",
             "when is the next prayer",
             "when is the next prayer time",
             "when is the next adhan",
             "when is the next azan",
             "when is the next salah",
+            "when is the next namaz",
+            "when is the next one",
             "what is the next prayer",
             "what prayer is next",
-            "next prayer",
-            "next adhan",
-            "next azan",
-            "next salah",
-            "next prayer time",
+            "what is next",
             "how long until the next prayer",
             "how long until the next adhan"
           ]
@@ -57,14 +64,26 @@
             }
           ],
           "samples": [
+            "{prayer}",
+            "{prayer} time",
+            "{prayer} today",
+            "{prayer} prayer",
+            "{prayer} prayer time",
+            "{prayer} adhan",
+            "{prayer} azan",
+            "{prayer} ajan",
+            "{prayer} adhan time",
+            "{prayer} namaz",
             "when is {prayer}",
             "when is {prayer} today",
             "when is the {prayer} prayer",
+            "when is the {prayer} adhan",
             "what time is {prayer}",
+            "what time is {prayer} today",
             "what time is the {prayer} prayer",
             "what time is the {prayer} adhan",
             "what is the {prayer} time",
-            "{prayer} time",
+            "time for {prayer}",
             "the time for {prayer}"
           ]
         },
@@ -77,25 +96,47 @@
             }
           ],
           "samples": [
+            "iqamah",
+            "iqama",
+            "iqamah time",
+            "jamaat",
+            "{prayer} iqamah",
+            "{prayer} iqama",
+            "{prayer} jamaat",
+            "{prayer} iqamah time",
+            "iqamah {prayer}",
+            "iqamah for {prayer}",
+            "iqama for {prayer}",
+            "jamaat for {prayer}",
             "when is iqamah for {prayer}",
             "when is the {prayer} iqamah",
+            "when is the {prayer} jamaat",
             "what time is iqamah for {prayer}",
-            "what time is the {prayer} iqamah",
-            "iqamah for {prayer}",
-            "{prayer} iqamah"
+            "what time is the {prayer} iqamah"
           ]
         },
         {
           "name": "TodayTimesIntent",
           "slots": [],
           "samples": [
+            "times",
+            "today",
+            "today times",
+            "prayer times",
+            "today's times",
+            "today's prayer times",
+            "today's timetable",
+            "timetable",
+            "all times",
+            "all prayer times",
+            "all the prayer times",
+            "adhan times",
+            "azan times",
+            "namaz times",
+            "salah times",
             "what are today's prayer times",
             "what are the prayer times",
             "what are the prayer times today",
-            "today's prayer times",
-            "today's times",
-            "all prayer times",
-            "all the prayer times",
             "list the prayer times",
             "tell me the prayer times"
           ]
@@ -104,15 +145,24 @@
           "name": "JummahIntent",
           "slots": [],
           "samples": [
+            "jummah",
+            "jumma",
+            "juma",
+            "jummah time",
+            "jummah times",
+            "jummah prayer",
+            "friday",
+            "friday prayer",
+            "friday prayer time",
+            "friday times",
+            "khutbah",
+            "khutbah time",
             "when is jummah",
             "when is jumma",
             "when is the jummah prayer",
             "when is the friday prayer",
             "what time is jummah",
-            "what time is the friday prayer",
-            "jummah times",
-            "jummah time",
-            "friday prayer time"
+            "what time is the friday prayer"
           ]
         }
       ],
@@ -123,31 +173,31 @@
             {
               "name": {
                 "value": "fajr",
-                "synonyms": ["fajar", "fajir", "fadjr", "the dawn prayer", "dawn prayer", "the morning prayer", "morning prayer"]
+                "synonyms": ["fajar", "fajir", "fadjr", "fajr prayer", "the dawn prayer", "dawn prayer", "the morning prayer", "morning prayer"]
               }
             },
             {
               "name": {
                 "value": "dhuhr",
-                "synonyms": ["duhr", "zuhr", "zohr", "zuhar", "dhuhur", "the noon prayer", "noon prayer", "the midday prayer", "midday prayer"]
+                "synonyms": ["duhr", "zuhr", "zohr", "zohor", "johr", "johor", "zuhar", "dhuhur", "duhur", "the noon prayer", "noon prayer", "the midday prayer", "midday prayer"]
               }
             },
             {
               "name": {
                 "value": "asr",
-                "synonyms": ["asar", "assr", "the afternoon prayer", "afternoon prayer"]
+                "synonyms": ["asar", "assr", "aser", "the afternoon prayer", "afternoon prayer"]
               }
             },
             {
               "name": {
                 "value": "maghrib",
-                "synonyms": ["magrib", "maghreb", "mugrib", "the sunset prayer", "sunset prayer", "the evening prayer", "evening prayer"]
+                "synonyms": ["magrib", "maghreb", "mugrib", "mogrib", "the sunset prayer", "sunset prayer", "the evening prayer", "evening prayer"]
               }
             },
             {
               "name": {
                 "value": "isha",
-                "synonyms": ["esha", "isha'a", "ishaa", "eesha", "the night prayer", "night prayer"]
+                "synonyms": ["esha", "isha'a", "ishaa", "eesha", "eshaa", "the night prayer", "night prayer"]
               }
             }
           ]

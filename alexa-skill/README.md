@@ -1,6 +1,6 @@
 # Alexa skill — ask the mosque about prayer times
 
-> "Alexa, ask my mosque when the next prayer is."
+> "Alexa, ask mosque when the next prayer is."
 > *"The next prayer is Maghrib at 9:01 PM, in 3 hours and 1 minute."*
 
 A voice front end for the same prayer times the Pi plays. It runs entirely in
@@ -16,13 +16,29 @@ works on your own Echo devices indefinitely.
 ## What you can ask
 
 ```
-Alexa, ask my mosque when the next prayer is
-Alexa, ask my mosque when Fajr is
-Alexa, ask my mosque what today's prayer times are
-Alexa, ask my mosque when jummah is
-Alexa, ask my mosque when iqamah is for Maghrib
-Alexa, open my mosque                       ← then just ask
+Alexa, ask mosque when the next prayer is
+Alexa, ask mosque when Fajr is
+Alexa, ask mosque what today's prayer times are
+Alexa, ask mosque when jummah is
+Alexa, ask mosque when iqamah is for Maghrib
 ```
+
+The short forms work too, which is what you end up using:
+
+```
+Alexa, ask mosque next
+Alexa, ask mosque isha
+Alexa, ask mosque maghrib iqamah
+Alexa, ask mosque times
+Alexa, ask mosque jummah
+Alexa, open mosque              ← answers, then leaves the mic open
+```
+
+Amazon requires the invocation name every time a skill is addressed cold, so
+`Alexa, next prayer` cannot work on its own. An
+[Alexa Routine](https://www.amazon.com/alexa-routines) closes that gap: trigger
+it on the phrase you want and give it the custom action
+`ask mosque when the next prayer is`.
 
 ## Install
 
@@ -31,7 +47,7 @@ Alexa, open my mosque                       ← then just ask
 At [developer.amazon.com/alexa](https://developer.amazon.com/alexa) →
 *Alexa Skills Kit* → **Create Skill**:
 
-- **Name:** `My Mosque`
+- **Name:** `Facemosque`
 - **Model:** Custom
 - **Hosting:** Alexa-hosted (Python)
 
@@ -56,7 +72,7 @@ in it is used.
 ### 4. Try it
 
 *Test* tab → switch from *Off* to **Development**, then type
-`ask my mosque when the next prayer is`.
+`ask mosque when the next prayer is`.
 
 It is already on your Echo devices at this point, as long as they are on the
 same Amazon account as the developer account.
