@@ -111,6 +111,7 @@ itself after a reboot or a power cut — nobody has to log in.
 ./adhanctl fetch     refresh the 30 day window now
 ./adhanctl show      print the schedule, including the jummah times
 ./adhanctl next      next adhan and how long until it
+./adhanctl jummah    which Friday prayer plays; `jummah 2` or `jummah all` to change
 ./adhanctl play      play the adhan now (speaker test)
 ./adhanctl stop      stop playback now
 ./adhanctl bundle    refresh the offline fallback (then commit it)
@@ -183,16 +184,29 @@ So the zone is configured in `.env` and the payload's field is ignored.
 
 On Friday the **jummah adhan replaces Dhuhr** — there is one midday prayer, and
 it is the jummah. A mosque often holds several: Takaful holds three, at 13:30
-Arabic, 14:30 English and 14:45 Arabic. `JUMMAH` picks which one plays:
+Arabic, 14:30 English and 14:45 Arabic.
+
+```sh
+adhanctl jummah        # what the mosque holds, and which ones will play
+adhanctl jummah 2      # only the 2nd
+adhanctl jummah all    # every one
+```
+
+```
+Jummah — on Fridays these replace Dhuhr:
+  13:30  Jummah 1 (Arabic)            skipped
+  14:30  Jummah 2 (English)           plays
+  14:45  Jummah 3 (Arabic)            skipped
+```
+
+It writes `JUMMAH` to `.env` and restarts the service for you — except mid-adhan,
+when it tells you to do it afterwards instead of cutting the playback off.
 
 | `JUMMAH` | What plays on Friday |
 | --- | --- |
 | *(blank)* | every jummah gets an adhan |
 | `2` | only the 2nd |
 | `9`, with only 3 jummahs | the last one — a wrong number never means silence |
-
-`./adhanctl show` prints the mosque's jummah times in order and marks which
-ones will play, so you can see what your setting does before Friday arrives.
 
 The API gives jummah a khutbah time and an iqamah time but no adhan time —
 there is nothing to compute, since the adhan is called as the khatib takes the

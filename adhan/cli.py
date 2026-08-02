@@ -60,7 +60,7 @@ def _print_jummah(schedule: Schedule, config: Config) -> None:
         return
     playing = {s.key for s in select_jummah(slots, config.jummah_choice)}
     print()
-    print("Jummah — on Fridays these replace the Dhuhr column above:")
+    print("Jummah — on Fridays these replace Dhuhr:")
     for slot in slots:
         mark = "plays" if slot.key in playing else "skipped"
         print(f"  {slot.at.strftime('%H:%M')}  {slot.label:<28} {mark}")
@@ -221,6 +221,62 @@ def _write_env(key: str, value: str) -> None:
     ENV_PATH.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
+def _restart_service() -> int:
+    """A config change means nothing until the service re-reads it."""
+    if _run("systemctl", "--user", "is-active", "adhan") != "active":
+        print("the service is not running; this applies when it next starts")
+        return 0
+    # Restarting kills the cgroup, and mpv with it. Not mid-adhan.
+    playing = subprocess.run(
+        ["pgrep", "-f", "[m]pv --no-video"], capture_output=True, check=False
+    )
+    if playing.returncode == 0:
+        print("an adhan is playing right now — apply this once it finishes:")
+        print("  systemctl --user restart adhan")
+        return 0
+    subprocess.run(["systemctl", "--user", "restart", "adhan"], check=False)
+    print("service restarted")
+    return 0
+
+
+def cmd_jummah(config: Config, schedule: Schedule, value: str | None) -> int:
+    """Show or set which Friday prayer gets an adhan."""
+    slots = schedule.jummah
+    if not slots:
+        print("no jummah times known for this mosque — run `adhanctl fetch` first")
+        return 1
+
+    if value is None:
+        _print_jummah(schedule, config)
+        print()
+        print("change it with:  adhanctl jummah 2      (only the 2nd)")
+        print("                 adhanctl jummah all    (every one)")
+        return 0
+
+    if value.strip().lower() in {"all", "every", "any"}:
+        _write_env("JUMMAH", "")
+        print(f"every jummah will play ({len(slots)} of them)")
+        return _restart_service()
+
+    try:
+        number = int(value)
+    except ValueError:
+        print(f"'{value}' is not a number — use a number, or 'all'", file=sys.stderr)
+        return 1
+    if number < 1:
+        print("the jummah number counts from 1", file=sys.stderr)
+        return 1
+
+    _write_env("JUMMAH", str(number))
+    picked = select_jummah(slots, number)[0]
+    if number > len(slots):
+        print(
+            f"the mosque holds {len(slots)} jummah, so {number} means the last one"
+        )
+    print(f"{picked.label} at {picked.at:%H:%M} will play")
+    return _restart_service()
+
+
 def cmd_play(config: Config, prayer: str) -> int:
     player = Player(config)
     if not player.play(prayer):
@@ -286,8 +342,13 @@ def main(argv: list[str] | None = None) -> int:
         "command",
         choices=(
             "run", "doctor", "pair", "fetch", "bundle",
-            "show", "next", "play", "stop",
+            "show", "next", "jummah", "play", "stop",
         ),
+    )
+    parser.add_argument(
+        "value",
+        nargs="?",
+        help="for `jummah`: a number, or 'all'. Omit to see the current setting.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -328,6 +389,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_fetch(config, schedule, now.date())
     if args.command == "bundle":
         return cmd_bundle(config, now.date())
+    if args.command == "jummah":
+        return cmd_jummah(config, schedule, args.value)
     if args.command == "show":
         if not len(schedule):
             print("nothing known; run `./adhanctl fetch`")
