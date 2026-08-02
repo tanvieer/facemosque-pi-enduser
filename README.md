@@ -106,6 +106,7 @@ itself after a reboot or a power cut — nobody has to log in.
 ## Everyday commands
 
 ```
+./adhanctl help      every command, with examples
 ./adhanctl doctor    every prerequisite, with the fix for each failure
 ./adhanctl pair      scan, pair, and write the MAC into .env
 ./adhanctl fetch     refresh the 30 day window now
@@ -144,10 +145,17 @@ Everything lives in `.env`, in the directory you cloned into. You do not have
 to open it in an editor:
 
 ```sh
-adhanctl set                              # every setting and its current value
-adhanctl set EXPO_PUBLIC_API_KEY=fm_...   # change one
-adhanctl set MOSQUE_ID=7
+adhanctl set                    # every setting and its current value
+adhanctl set key fm_...         # change one
+adhanctl set mosque 7
+adhanctl set fajr=              # clear one
 ```
+
+Settings have short names so you never type `EXPO_PUBLIC_API_KEY`: `key`,
+`url`, `mosque`, `tz`, `audio`, `fajr`, `speaker`, `name`, `alexa`, `prayers`,
+`jummah`, `days`, `refresh`, `fallback`. The full name works too, as does any
+unambiguous part of one — `adhanctl set alexa_port 52001`. `adhanctl set` on
+its own lists them with their short names.
 
 `set` restarts the service so the change takes effect. Setting the API key on
 a Pi where the service never started — because it had no key — starts it and

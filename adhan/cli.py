@@ -70,6 +70,58 @@ def _print_jummah(schedule: Schedule, config: Config) -> None:
 
 # --------------------------------------------------------------- commands
 
+HELP = """\
+adhanctl — plays the adhan at each waqt through a Bluetooth speaker.
+
+  Every day
+    adhanctl next                 when the next adhan is due
+    adhanctl show                 the schedule, and the jummah times
+    adhanctl play                 play the adhan now — a speaker test
+    adhanctl stop                 stop playback
+
+  Settings — each of these restarts the service for you
+    adhanctl set                  every setting, with its short name
+    adhanctl set key fm_...       the Facemosque API key
+    adhanctl set mosque 7         which mosque (a number; the API rejects slugs)
+    adhanctl set tz Asia/Dhaka    the timezone the mosque is in
+    adhanctl set fajr=            clear a setting
+
+  Friday — the jummah adhan replaces dhuhr
+    adhanctl jummah               which jummah the mosque holds, and which play
+    adhanctl jummah 2             only the 2nd
+    adhanctl jummah all           every one
+
+  Speaker
+    adhanctl pair                 scan, pair, and remember a speaker
+                                  (put it in pairing mode first: on an Echo,
+                                  say "Alexa, pair Bluetooth")
+    There is no volume setting. Turn the speaker itself up or down.
+
+  Prayer times
+    adhanctl fetch                refresh the 30-day window now
+    adhanctl bundle               rebuild the offline fallback in data/
+    They refresh every 3 days on their own, and a year of times ships in the
+    repo, so the adhan still plays with no internet at all.
+
+  When something is wrong
+    adhanctl doctor               every prerequisite, with the fix for each
+    journalctl --user -u adhan -f            watch the log
+    systemctl --user restart adhan           restart it
+    systemctl --user status adhan            is it running?
+
+  Add -v to any command for debug logging.
+
+The service starts by itself at boot — nobody has to log in.
+"""
+
+
+def cmd_help() -> int:
+    print(HELP, end="")
+    print(f"Installed in:  {REPO_ROOT}")
+    print(f"Settings:      {ENV_PATH}")
+    return 0
+
+
 
 def cmd_doctor(config: Config) -> int:
     """Check everything a fresh Pi needs. Each of these was a real failure
@@ -249,6 +301,47 @@ def _restart_service(start_if_stopped: bool = False) -> int:
     return 0
 
 
+# Short names for the settings people actually change. EXPO_PUBLIC_API_KEY is
+# the API's own name for it and has to stay that in .env, but nobody should
+# have to type it.
+ALIASES = {
+    "key": "EXPO_PUBLIC_API_KEY",
+    "url": "EXPO_PUBLIC_API_BASE_URL",
+    "mosque": "MOSQUE_ID",
+    "tz": "TIMEZONE",
+    "timezone": "TIMEZONE",
+    "audio": "AUDIO_PATH",
+    "fajr": "AUDIO_PATH_FAJR",
+    "speaker": "BT_SINK_MAC",
+    "mac": "BT_SINK_MAC",
+    "name": "BT_SINK_NAME",
+    "alexa": "ALEXA_ENABLED",
+    "prayers": "PRAYERS",
+    "jummah": "JUMMAH",
+    "days": "SCHEDULE_DAYS",
+    "refresh": "REFRESH_INTERVAL_DAYS",
+    "fallback": "FALLBACK_PATH",
+}
+
+
+def _resolve_key(name: str, known: dict) -> str | None:
+    """Short name, full name, or any unambiguous part of one."""
+    lowered = name.strip().lower()
+    if lowered.upper() in known:
+        return lowered.upper()
+    if lowered in ALIASES and ALIASES[lowered] in known:
+        return ALIASES[lowered]
+    matches = [k for k in known if lowered in k.lower()]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _short_name(key: str) -> str:
+    for alias, full in ALIASES.items():
+        if full == key:
+            return alias
+    return ""
+
+
 def _mask(key: str, value: str) -> str:
     """Never print a whole API key: this output gets pasted into chats."""
     if not value or "KEY" not in key:
@@ -256,31 +349,41 @@ def _mask(key: str, value: str) -> str:
     return value[:7] + "…" if len(value) > 10 else "…"
 
 
-def cmd_set(assignment: str | None) -> int:
-    """Show or change a setting in .env, without opening an editor."""
+def cmd_set(words: list[str]) -> int:
+    """Show or change a setting in .env, without opening an editor.
+
+    Takes `set key=value` or `set key value`, since people type both.
+    """
     known = read_env_file(REPO_ROOT / ".env.example")
     current = read_env_file(ENV_PATH)
 
-    if assignment is None:
+    if not words:
         print(f"{ENV_PATH}")
         print()
         for key in known:
-            print(f"  {key}={_mask(key, current.get(key, ''))}")
+            print(
+                f"  {_short_name(key):<9} {key}={_mask(key, current.get(key, ''))}"
+            )
         print()
-        print("change one with:  adhanctl set KEY=value")
+        print("change one with:  adhanctl set key fm_...   (short name or full)")
         return 0
 
-    key, separator, value = assignment.partition("=")
-    key, value = key.strip().upper(), value.strip()
-    if not separator:
-        print(
-            "use KEY=value, e.g.\n"
-            "  adhanctl set EXPO_PUBLIC_API_KEY=fm_...",
-            file=sys.stderr,
-        )
-        return 1
-    if key not in known:
-        print(f"unknown setting {key!r} — `adhanctl set` lists them", file=sys.stderr)
+    if len(words) == 1:
+        name, separator, value = words[0].partition("=")
+        if not separator:
+            print(
+                f"no value given. Use:  adhanctl set {name} <value>\n"
+                f"          to clear:  adhanctl set {name}=",
+                file=sys.stderr,
+            )
+            return 1
+    else:
+        name, value = words[0].rstrip("="), " ".join(words[1:])
+
+    key = _resolve_key(name, known)
+    value = value.strip()
+    if key is None:
+        print(f"unknown setting {name!r} — `adhanctl set` lists them", file=sys.stderr)
         return 1
 
     _write_env(key, value)
@@ -389,22 +492,30 @@ def cmd_bundle(config: Config, today: date) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="adhanctl")
+    parser = argparse.ArgumentParser(prog="adhanctl", add_help=False)
     parser.add_argument(
         "command",
+        nargs="?",
+        default="help",
         choices=(
-            "run", "doctor", "pair", "fetch", "bundle",
+            "help", "run", "doctor", "pair", "fetch", "bundle",
             "show", "next", "set", "jummah", "play", "stop",
         ),
     )
     parser.add_argument(
         "value",
-        nargs="?",
-        help="for `set`: KEY=value. For `jummah`: a number, or 'all'. "
-        "Omit either to see the current setting.",
+        nargs="*",
+        help="for `set`: `key value` or `key=value`. For `jummah`: a number, "
+        "or 'all'. Omit either to see the current setting.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
+    # -h/--help is handled by hand so it prints the same guide as `help`,
+    # rather than argparse's one-line usage.
+    parser.add_argument("-h", "--help", action="store_true", dest="want_help")
     args = parser.parse_args(argv)
+
+    if args.want_help or args.command == "help":
+        return cmd_help()
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -449,7 +560,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "bundle":
         return cmd_bundle(config, now.date())
     if args.command == "jummah":
-        return cmd_jummah(config, schedule, args.value)
+        return cmd_jummah(config, schedule, args.value[0] if args.value else None)
     if args.command == "show":
         if not len(schedule):
             print("nothing known; run `./adhanctl fetch`")
