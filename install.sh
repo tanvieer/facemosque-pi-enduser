@@ -141,6 +141,17 @@ interactive() { [[ -t 0 ]]; }
 
 info "Configuring"
 
+# Values already in the environment win over asking. This is what makes a
+# scripted install possible:
+#   EXPO_PUBLIC_API_KEY=fm_... BT_SINK_MAC=AA:BB:.. ./install.sh
+# and it is also the only way to install over a non-interactive SSH command.
+for VAR in EXPO_PUBLIC_API_KEY MOSQUE_ID TIMEZONE BT_SINK_MAC BT_SINK_NAME JUMMAH; do
+  if [[ -n "${!VAR:-}" && -z "$(env_value "$VAR")" ]]; then
+    set_env "$VAR" "${!VAR}"
+    note "$VAR taken from the environment"
+  fi
+done
+
 if [[ -z "$(env_value EXPO_PUBLIC_API_KEY)" ]]; then
   if interactive; then
     printf '    Facemosque API key (Enter to skip): '
