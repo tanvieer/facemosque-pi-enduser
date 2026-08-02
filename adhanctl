@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Thin wrapper so the CLI can be run from anywhere: ./adhan <command>
+cd "$(dirname "$(readlink -f "$0")")"
+exec python3 -m adhan.cli "$@"

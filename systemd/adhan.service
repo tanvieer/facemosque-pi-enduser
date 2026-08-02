@@ -1,0 +1,19 @@
+[Unit]
+Description=Facemosque adhan player
+Documentation=https://facemosque.com
+# PipeWire is a user service and must be up before we try to open the speaker.
+After=network-online.target pipewire.service wireplumber.service
+Wants=network-online.target pipewire.service wireplumber.service
+# The whole point of the device is that it never gives up. This belongs in
+# [Unit], not [Service] -- systemd ignores it there with only a log line.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO@
+ExecStart=/usr/bin/python3 -m adhan.cli run
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

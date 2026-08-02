@@ -1,0 +1,31 @@
+# ---- secrets --------------------------------------------------------------
+# Real API key, speaker MAC and any local overrides. .env.example shows the
+# shape; the real file must never be committed.
+.env
+.env.local
+.env.*.local
+
+# ---- python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# ---- runtime --------------------------------------------------------------
+# The schedule cache and fired-state live in STATE_DIR (~/.local/state/adhan
+# by default), but keep these out in case anyone points STATE_DIR here.
+*.log
+schedule.json
+fired.json
+
+# ---- editors and os -------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
