@@ -99,6 +99,16 @@ sed "s|@REPO@|$REPO|g" "$REPO/systemd/adhan.service" > "$UNIT_DIR/adhan.service"
 systemctl --user daemon-reload
 note "$UNIT_DIR/adhan.service"
 
+# ------------------------------------------------------------ on PATH
+info "Command on PATH"
+# adhanctl resolves its own real path, so a symlink works without it losing
+# track of the repo it lives in. Non-fatal: the ./adhanctl form always works.
+if sudo ln -sf "$REPO/adhanctl" /usr/local/bin/adhanctl 2>/dev/null; then
+  note "adhanctl works from any directory"
+else
+  note "could not link into /usr/local/bin; use ./adhanctl from $REPO"
+fi
+
 # ----------------------------------------------------------------- finish
 if [[ $GROUP_CHANGED -eq 1 ]]; then
   info "Group membership changed"
