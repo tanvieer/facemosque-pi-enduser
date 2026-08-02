@@ -111,6 +111,7 @@ itself after a reboot or a power cut — nobody has to log in.
 ./adhanctl fetch     refresh the 30 day window now
 ./adhanctl show      print the schedule, including the jummah times
 ./adhanctl next      next adhan and how long until it
+./adhanctl set       show every setting; `set KEY=value` to change one
 ./adhanctl jummah    which Friday prayer plays; `jummah 2` or `jummah all` to change
 ./adhanctl play      play the adhan now (speaker test)
 ./adhanctl stop      stop playback now
@@ -139,8 +140,21 @@ cd ~/adhan && git pull && systemctl --user restart adhan
 
 ## Configuration
 
-Everything lives in `.env` — see [.env.example](.env.example) for the full
-list with comments.
+Everything lives in `.env`, in the directory you cloned into. You do not have
+to open it in an editor:
+
+```sh
+adhanctl set                              # every setting and its current value
+adhanctl set EXPO_PUBLIC_API_KEY=fm_...   # change one
+adhanctl set MOSQUE_ID=7
+```
+
+`set` restarts the service so the change takes effect. Setting the API key on
+a Pi where the service never started — because it had no key — starts it and
+enables it for the next boot, which is the last step of an install that was
+run without one.
+
+See [.env.example](.env.example) for the full list with comments.
 
 | Key | Meaning |
 | --- | --- |

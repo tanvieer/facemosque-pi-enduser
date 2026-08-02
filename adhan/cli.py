@@ -12,7 +12,7 @@ from datetime import date, datetime
 
 from .api import ApiError, ApiUnavailable
 from .bluetooth import BluetoothLink, pair, scan
-from .config import ENV_PATH, PRAYER_LABELS, Config
+from .config import ENV_PATH, PRAYER_LABELS, REPO_ROOT, Config, read_env_file
 from .player import Player, find_bluetooth_sink
 from .schedule import Schedule, fetch_years, select_jummah, write_bundle
 from .service import AdhanService
@@ -221,22 +221,74 @@ def _write_env(key: str, value: str) -> None:
     ENV_PATH.write_text("\n".join(out) + "\n", encoding="utf-8")
 
 
-def _restart_service() -> int:
-    """A config change means nothing until the service re-reads it."""
+def _restart_service(start_if_stopped: bool = False) -> int:
+    """A config change means nothing until the service re-reads it.
+
+    `start_if_stopped` is for the case that finishes an install: the service
+    could not run without an API key, so supplying one should start it rather
+    than leave the user to work out that a last step remains.
+    """
     if _run("systemctl", "--user", "is-active", "adhan") != "active":
+        if start_if_stopped:
+            _run("systemctl", "--user", "enable", "--now", "adhan", timeout=30)
+            time.sleep(3)
+            if _run("systemctl", "--user", "is-active", "adhan") == "active":
+                print("service started, and it will start on its own after a reboot")
+                return 0
+            print("service did not start — see: journalctl --user -u adhan -n 20")
+            return 1
         print("the service is not running; this applies when it next starts")
         return 0
     # Restarting kills the cgroup, and mpv with it. Not mid-adhan.
-    playing = subprocess.run(
-        ["pgrep", "-f", "[m]pv --no-video"], capture_output=True, check=False
-    )
-    if playing.returncode == 0:
+    if _run("pgrep", "-f", "[m]pv --no-video"):
         print("an adhan is playing right now — apply this once it finishes:")
         print("  systemctl --user restart adhan")
         return 0
-    subprocess.run(["systemctl", "--user", "restart", "adhan"], check=False)
+    _run("systemctl", "--user", "restart", "adhan", timeout=30)
     print("service restarted")
     return 0
+
+
+def _mask(key: str, value: str) -> str:
+    """Never print a whole API key: this output gets pasted into chats."""
+    if not value or "KEY" not in key:
+        return value
+    return value[:7] + "…" if len(value) > 10 else "…"
+
+
+def cmd_set(assignment: str | None) -> int:
+    """Show or change a setting in .env, without opening an editor."""
+    known = read_env_file(REPO_ROOT / ".env.example")
+    current = read_env_file(ENV_PATH)
+
+    if assignment is None:
+        print(f"{ENV_PATH}")
+        print()
+        for key in known:
+            print(f"  {key}={_mask(key, current.get(key, ''))}")
+        print()
+        print("change one with:  adhanctl set KEY=value")
+        return 0
+
+    key, separator, value = assignment.partition("=")
+    key, value = key.strip().upper(), value.strip()
+    if not separator:
+        print(
+            "use KEY=value, e.g.\n"
+            "  adhanctl set EXPO_PUBLIC_API_KEY=fm_...",
+            file=sys.stderr,
+        )
+        return 1
+    if key not in known:
+        print(f"unknown setting {key!r} — `adhanctl set` lists them", file=sys.stderr)
+        return 1
+
+    _write_env(key, value)
+    print(f"{key}={_mask(key, value)}")
+    # Supplying the key is what makes a half-finished install runnable.
+    return _restart_service(
+        start_if_stopped=(key == "EXPO_PUBLIC_API_KEY" and bool(value))
+    )
 
 
 def cmd_jummah(config: Config, schedule: Schedule, value: str | None) -> int:
@@ -342,13 +394,14 @@ def main(argv: list[str] | None = None) -> int:
         "command",
         choices=(
             "run", "doctor", "pair", "fetch", "bundle",
-            "show", "next", "jummah", "play", "stop",
+            "show", "next", "set", "jummah", "play", "stop",
         ),
     )
     parser.add_argument(
         "value",
         nargs="?",
-        help="for `jummah`: a number, or 'all'. Omit to see the current setting.",
+        help="for `set`: KEY=value. For `jummah`: a number, or 'all'. "
+        "Omit either to see the current setting.",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -359,10 +412,16 @@ def main(argv: list[str] | None = None) -> int:
         datefmt="%H:%M:%S",
     )
 
+    # Before Config.load(): without an API key the config will not load at all,
+    # and that is exactly when someone needs to set one.
+    if args.command == "set":
+        return cmd_set(args.value)
+
     try:
         config = Config.load()
     except RuntimeError as exc:
         print(f"config error: {exc}", file=sys.stderr)
+        print("fix it with:  adhanctl set KEY=value", file=sys.stderr)
         return 2
 
     if args.command == "run":
@@ -378,7 +437,7 @@ def main(argv: list[str] | None = None) -> int:
         # this command: pkill -f sees full command lines, and a script whose
         # own line contains "mpv --no-video" would otherwise kill itself. As a
         # regex, "[m]pv" matches "mpv" but not the literal text "[m]pv".
-        subprocess.run(["pkill", "-f", "[m]pv --no-video"], check=False)
+        _run("pkill", "-f", "[m]pv --no-video")
         return 0
 
     schedule = Schedule(config)
