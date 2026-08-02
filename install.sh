@@ -110,10 +110,10 @@ fi
 
 info "Next steps"
 cat <<EOF
-    1. Edit .env           — API key, mosque id, timezone
+    1. nano .env              — API key, mosque id, timezone
     2. ./adhanctl pair        — pair the speaker (put it in pairing mode first)
     3. ./adhanctl doctor      — verify everything
     4. ./adhanctl fetch       — pull the prayer times
-    5. systemctl --user enable --now adhan
-    6. Say "Alexa, discover devices" so voice stop works
+    5. ./adhanctl play        — you should hear the adhan; set volume on the speaker
+    6. systemctl --user enable --now adhan
 EOF

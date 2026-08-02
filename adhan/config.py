@@ -131,7 +131,9 @@ class Config:
             audio_path_fajr=audio_path_fajr,
             bt_sink_mac=bt_mac,
             bt_sink_name=optional("BT_SINK_NAME", "Echo"),
-            alexa_enabled=_as_bool(get("ALEXA_ENABLED", "true")),
+            # Off unless asked for: current Echo firmware does not discover
+            # local WeMo devices, so the listener would just idle. See README.
+            alexa_enabled=_as_bool(get("ALEXA_ENABLED", "false")),
             alexa_device_name=optional("ALEXA_DEVICE_NAME", "Adhan"),
             alexa_port=int(get("ALEXA_PORT", "52000")),
             state_dir=Path(
