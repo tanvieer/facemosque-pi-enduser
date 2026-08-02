@@ -24,6 +24,10 @@ schedule.json
 fired.json
 fallback.json
 
+# A copy of data/mosque-<id>.json, pasted into the Alexa skill at deploy time.
+# One canonical copy beats two that drift apart.
+alexa-skill/prayer-times.json
+
 # ---- editors and os -------------------------------------------------------
 .vscode/
 .idea/
