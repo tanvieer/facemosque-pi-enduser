@@ -109,7 +109,6 @@ else
   note "could not link into /usr/local/bin; use ./adhanctl from $REPO"
 fi
 
-# ----------------------------------------------------------------- finish
 if [[ $GROUP_CHANGED -eq 1 ]]; then
   info "Group membership changed"
   note "The running user session still has the old groups."
@@ -118,12 +117,71 @@ if [[ $GROUP_CHANGED -eq 1 ]]; then
   sleep 3
 fi
 
-info "Next steps"
-cat <<EOF
-    1. nano .env              — API key, mosque id, timezone
-    2. ./adhanctl pair        — pair the speaker (put it in pairing mode first)
-    3. ./adhanctl doctor      — verify everything
-    4. ./adhanctl fetch       — pull the prayer times
-    5. ./adhanctl play        — you should hear the adhan; set volume on the speaker
-    6. systemctl --user enable --now adhan
-EOF
+# ------------------------------------------------------------- setup
+# Everything below is what a person would otherwise have to do by hand after
+# the install. Asking here is what makes `./install.sh` the only command:
+# whoever is running it is sitting at a terminal, so ask them.
+#
+# Non-interactive runs (piped, or from a provisioning script) skip the
+# questions and print what is left instead -- prompting into a closed stdin
+# would hang forever.
+env_value() { grep -E "^$1=" "$REPO/.env" | head -1 | cut -d= -f2-; }
+set_env()   { sed -i "s|^$1=.*|$1=$2|" "$REPO/.env"; }
+interactive() { [[ -t 0 ]]; }
+
+info "Configuring"
+
+if [[ -z "$(env_value EXPO_PUBLIC_API_KEY)" ]]; then
+  if interactive; then
+    printf '    Facemosque API key (Enter to skip): '
+    read -r API_KEY
+    [[ -n "$API_KEY" ]] && set_env EXPO_PUBLIC_API_KEY "$API_KEY" && note "saved to .env"
+  else
+    note "no API key in .env — add it, then re-run this script"
+  fi
+else
+  note "API key already set"
+fi
+
+if [[ -z "$(env_value BT_SINK_MAC)" ]]; then
+  if interactive; then
+    printf '    Pair a Bluetooth speaker now? [Y/n] '
+    read -r ANSWER
+    if [[ ! "$ANSWER" =~ ^[Nn] ]]; then
+      "$REPO/adhanctl" pair || note "not paired — run 'adhanctl pair' when ready"
+    fi
+  else
+    note "no speaker configured — run 'adhanctl pair'"
+  fi
+else
+  note "speaker already configured: $(env_value BT_SINK_NAME)"
+fi
+
+# ----------------------------------------------------------------- start
+# Only with a key: without one the service cannot start, and systemd would
+# restart it every 10s forever with nothing but a config error to show for it.
+if [[ -n "$(env_value EXPO_PUBLIC_API_KEY)" ]]; then
+  info "Starting"
+  if "$REPO/adhanctl" fetch >/dev/null 2>&1; then
+    note "prayer times fetched"
+  else
+    note "could not reach the API — the bundled times cover it, and it retries"
+  fi
+  systemctl --user enable --now adhan >/dev/null 2>&1
+  sleep 3
+  if [[ "$(systemctl --user is-active adhan)" == "active" ]]; then
+    note "service running, and it will start again on its own after a reboot"
+    "$REPO/adhanctl" next 2>/dev/null | sed 's/^/    /'
+  else
+    note "service did not start — see: journalctl --user -u adhan -n 20"
+  fi
+fi
+
+info "Done"
+echo "    adhanctl doctor    check every prerequisite"
+echo "    adhanctl play      hear the adhan now (set the volume on the speaker)"
+echo "    adhanctl next      when the next one is due"
+if [[ -z "$(env_value EXPO_PUBLIC_API_KEY)" ]]; then
+  echo
+  echo "    Not started yet: put your API key in $REPO/.env and re-run ./install.sh"
+fi

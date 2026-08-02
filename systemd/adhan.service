@@ -14,6 +14,10 @@ WorkingDirectory=@REPO@
 ExecStart=/usr/bin/python3 -m adhan.cli run
 Restart=always
 RestartSec=10
+# Exit 2 is a bad .env -- a missing API key, an unparseable value. Restarting
+# every 10s forever cannot fix that, and it buries the one message that says
+# what is wrong. Stop, and let `systemctl status` show the reason.
+RestartPreventExitStatus=2
 
 [Install]
 WantedBy=default.target

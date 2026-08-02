@@ -56,79 +56,50 @@ ssh <username>@adhan.local
 If `adhan.local` does not resolve, find the Pi's IP in your router's device
 list and use that instead.
 
-### 3. Install
+### 3. Put the speaker in pairing mode
+
+Do this before the next step, so the installer can find it. On an Echo, say
+**"Alexa, pair Bluetooth"**, or use the Alexa app → *Devices* → your Echo →
+*Bluetooth Devices* → *Pair a New Device*.
+
+### 4. Run the installer
 
 ```sh
 sudo apt update && sudo apt install -y git
 git clone https://github.com/tanvieer/facemosque-pi-enduser.git ~/adhan
-cd ~/adhan
-./install.sh
+cd ~/adhan && ./install.sh
 ```
 
-`install.sh` installs the packages, fixes the three headless-Bluetooth traps
-(see [below](#what-the-installer-fixes)), creates `.env`, and registers the
-service. It is safe to run again at any time.
+That is the whole install. `install.sh` asks you two questions — your API key,
+and which speaker to pair with — and does everything else itself: packages,
+the three headless-Bluetooth fixes (see [below](#what-the-installer-fixes)),
+`.env`, the systemd unit, the first fetch, and starting the service. It ends
+by telling you when the next adhan is due.
 
-### 4. Fill in `.env`
+It is safe to run again at any time; it never overwrites an existing `.env`.
 
-```sh
-nano .env
-```
-
-**`EXPO_PUBLIC_API_KEY` is the only value you must supply.** Everything else
-already has a working default, so pasting your key in is enough to start. Save
-with `Ctrl-O`, exit with `Ctrl-X`.
-
-If your mosque is not Takaful in Chemnitz, also set `MOSQUE_ID` and `TIMEZONE`
-— those are what the defaults point at.
-
-To find your mosque id, ask the API (it is a plain numeric id — slugs are
-rejected):
+**Your API key is the only thing you must supply.** Everything else already
+has a working default. If your mosque is not Takaful in Chemnitz, open `.env`
+afterwards and set `MOSQUE_ID` and `TIMEZONE` — that is what the defaults
+point at. To find your mosque id (a plain number; the API rejects slugs):
 
 ```sh
 curl -s -H "X-API-Key: YOUR_KEY" https://facemosque.com/api/v1/mosques \
   | python3 -m json.tool
 ```
 
-### 5. Pair the speaker
-
-Put the speaker into pairing mode first. On an Echo, say **"Alexa, pair
-Bluetooth"**, or use the Alexa app → *Devices* → your Echo → *Bluetooth
-Devices* → *Pair a New Device*. Then:
+### 5. Check it
 
 ```sh
-./adhanctl pair
+adhanctl doctor    # every prerequisite, with the fix for each failure
+adhanctl play      # you should hear the adhan — set the volume on the speaker
+adhanctl next      # when the next one is due
 ```
 
-It scans for 20 seconds, lists what it found, and you type the number. The MAC
-address is written back into `.env` for you.
+The program has no volume control on purpose: turn the Echo itself up or down.
 
-### 6. Test and start
-
-```sh
-./adhanctl doctor    # checks every prerequisite, tells you the fix for each
-./adhanctl fetch     # pull the next 30 days of prayer times
-./adhanctl play      # you should hear the adhan now
-```
-
-Set the loudness on the speaker itself — turn the Echo up or down until it is
-right. The program has no volume control on purpose.
-
-When `play` works, start it for real:
-
-```sh
-systemctl --user enable --now adhan
-```
-
-That is it. The Pi now plays the adhan on its own, and starts again by itself
-after a reboot or a power cut.
-
-### 7. Check that it is alive
-
-```sh
-./adhanctl next                    # next adhan, and how long until it
-journalctl --user -u adhan -f      # live log
-```
+That is it. The Pi plays the adhan on its own from here, and starts again by
+itself after a reboot or a power cut — nobody has to log in.
 
 ---
 

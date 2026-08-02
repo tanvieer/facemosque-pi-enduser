@@ -313,7 +313,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "play":
         return cmd_play(config, "manual")
     if args.command == "stop":
-        subprocess.run(["pkill", "-f", "mpv --no-video"], check=False)
+        # The brackets keep the pattern from matching the shell that is running
+        # this command: pkill -f sees full command lines, and a script whose
+        # own line contains "mpv --no-video" would otherwise kill itself. As a
+        # regex, "[m]pv" matches "mpv" but not the literal text "[m]pv".
+        subprocess.run(["pkill", "-f", "[m]pv --no-video"], check=False)
         return 0
 
     schedule = Schedule(config)
