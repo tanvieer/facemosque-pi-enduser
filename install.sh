@@ -29,8 +29,18 @@ fi
 
 # ---------------------------------------------------------------- packages
 info "Installing packages"
-sudo apt-get update -qq
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+# Wait for the dpkg lock rather than hanging on it silently: unattended-upgrades
+# or another apt someone left running at the console will hold it, and apt's
+# default is to block with no explanation at all. Ten minutes, then say so.
+APT_OPTS=(-o "DPkg::Lock::Timeout=600")
+if ! sudo apt-get "${APT_OPTS[@]}" update -qq; then
+  echo "apt is locked by another process. Wait for it to finish, then re-run." >&2
+  exit 1
+fi
+# NEEDRESTART_MODE=a stops needrestart interrupting with a service-restart
+# menu when this runs on a terminal.
+sudo DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a \
+  apt-get "${APT_OPTS[@]}" install -y -qq \
   mpv mpv-mpris \
   pipewire pipewire-pulse wireplumber libspa-0.2-bluetooth \
   bluez
