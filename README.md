@@ -112,7 +112,7 @@ itself after a reboot or a power cut — nobody has to log in.
 ./adhanctl fetch     refresh the 30 day window now
 ./adhanctl show      print the schedule, including the jummah times
 ./adhanctl next      next adhan and how long until it
-./adhanctl set       show every setting; `set KEY=value` to change one
+./adhanctl set       show every setting; `set key fm_...` to change one
 ./adhanctl jummah    which Friday prayer plays; `jummah 2` or `jummah all` to change
 ./adhanctl play      play the adhan now (speaker test)
 ./adhanctl stop      stop playback now
@@ -184,7 +184,8 @@ care about. A *wrong* value is still an error: `MOSQUE_ID=takaful` or an
 unknown timezone stops the service with a message naming the key, rather than
 guessing and playing another city's times.
 
-Restart the service after any edit: `systemctl --user restart adhan`.
+`adhanctl set` restarts the service itself. If you edit `.env` by hand
+instead, restart it yourself: `systemctl --user restart adhan`.
 
 There is deliberately **no volume setting**. The adhan plays at unity gain and
 the speaker's own volume is the only control. The service does pin the
