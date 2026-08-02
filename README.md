@@ -7,6 +7,8 @@ anything else that accepts A2DP.
 ```
 Facemosque API ──30 day window, refreshed every 3 days──> local cache
                                                               │
+   a year of times committed in data/ ───(when offline)───────┤
+                                                              │
                               scheduler ────────────────────> mpv
                                                               │
                                               PipeWire ──A2DP──> Echo Dot
@@ -14,7 +16,8 @@ Facemosque API ──30 day window, refreshed every 3 days──> local cache
 
 Python 3 standard library only — no pip packages, no venv, nothing for
 Debian's PEP 668 to object to. Everything you configure lives in one `.env`
-file.
+file, and only one line of it is mandatory. It also works with no internet at
+all.
 
 ---
 
@@ -72,12 +75,12 @@ service. It is safe to run again at any time.
 nano .env
 ```
 
-You need three things: `EXPO_PUBLIC_API_KEY`, `MOSQUE_ID`, and `TIMEZONE`.
-Everything else already has a sensible default. Save with `Ctrl-O`, exit with
-`Ctrl-X`.
+**`EXPO_PUBLIC_API_KEY` is the only value you must supply.** Everything else
+already has a working default, so pasting your key in is enough to start. Save
+with `Ctrl-O`, exit with `Ctrl-X`.
 
-None of the three is guessed for you. Leave one blank and the service refuses
-to start and names it — better than quietly playing another city's times.
+If your mosque is not Takaful in Chemnitz, also set `MOSQUE_ID` and `TIMEZONE`
+— those are what the defaults point at.
 
 To find your mosque id, ask the API (it is a plain numeric id — slugs are
 rejected):
@@ -135,10 +138,11 @@ journalctl --user -u adhan -f      # live log
 ./adhanctl doctor    every prerequisite, with the fix for each failure
 ./adhanctl pair      scan, pair, and write the MAC into .env
 ./adhanctl fetch     refresh the 30 day window now
-./adhanctl show      print the cached schedule
+./adhanctl show      print the schedule, including the jummah times
 ./adhanctl next      next adhan and how long until it
 ./adhanctl play      play the adhan now (speaker test)
 ./adhanctl stop      stop playback now
+./adhanctl bundle    refresh the offline fallback (then commit it)
 ./adhanctl run       run the service in the foreground
 ```
 
@@ -168,16 +172,23 @@ list with comments.
 
 | Key | Meaning |
 | --- | --- |
-| `EXPO_PUBLIC_API_KEY` | Facemosque visitor key **(required)** |
-| `MOSQUE_ID` | Numeric id — the API rejects slugs **(required)** |
-| `TIMEZONE` | IANA zone, e.g. `Europe/Berlin` **(required)** |
+| `EXPO_PUBLIC_API_KEY` | Facemosque visitor key — **the only required value** |
+| `MOSQUE_ID` | Numeric id — the API rejects slugs (default `4`, Takaful) |
+| `TIMEZONE` | IANA zone (default `Europe/Berlin`) |
 | `AUDIO_PATH` | Any format ffmpeg reads |
 | `AUDIO_PATH_FAJR` | Optional separate Fajr adhan |
 | `BT_SINK_MAC` | Written for you by `./adhanctl pair` |
 | `PRAYERS` | Which waqts play, comma separated |
+| `JUMMAH` | Which Friday prayer plays — see [below](#friday) |
+| `FALLBACK_PATH` | Offline times — see [below](#it-keeps-working-without-internet) |
 | `SCHEDULE_DAYS` | How many days to cache (default 30) |
 | `REFRESH_INTERVAL_DAYS` | How often to re-fetch (default 3) |
 | `ALEXA_ENABLED` | Experimental voice stop — see [below](#alexa-voice-control-does-not-work-and-why) |
+
+A blank value means "use the default", so you can delete a line you do not
+care about. A *wrong* value is still an error: `MOSQUE_ID=takaful` or an
+unknown timezone stops the service with a message naming the key, rather than
+guessing and playing another city's times.
 
 Restart the service after any edit: `systemctl --user restart adhan`.
 
@@ -196,6 +207,53 @@ is CEST, not UTC. The times are correct as printed; only the label is wrong.
 So the zone is configured in `.env` and the payload's field is ignored.
 
 ---
+
+## Friday
+
+On Friday the **jummah adhan replaces Dhuhr** — there is one midday prayer, and
+it is the jummah. A mosque often holds several: Takaful holds three, at 13:30
+Arabic, 14:30 English and 14:45 Arabic. `JUMMAH` picks which one plays:
+
+| `JUMMAH` | What plays on Friday |
+| --- | --- |
+| *(blank)* | every jummah gets an adhan |
+| `2` | only the 2nd |
+| `9`, with only 3 jummahs | the last one — a wrong number never means silence |
+
+`./adhanctl show` prints the mosque's jummah times in order and marks which
+ones will play, so you can see what your setting does before Friday arrives.
+
+The API gives jummah a khutbah time and an iqamah time but no adhan time —
+there is nothing to compute, since the adhan is called as the khatib takes the
+minbar. So the khutbah time is when it plays, with iqamah as the fallback for
+a mosque that filled in only that one.
+
+If the mosque has no jummah configured at all, Friday keeps its ordinary Dhuhr
+adhan. Better the normal adhan than a silent Friday.
+
+## It keeps working without internet
+
+A full year of prayer times is committed in [`data/`](data/), so a Pi that
+cannot reach the API still calls the adhan. The order of preference is:
+
+1. what was fetched in the last few days (`~/.local/state/adhan/schedule.json`)
+2. the bundled year in `data/mosque-<id>.json`
+
+The bundle is read-only and never overwritten by the service; the live fetch
+simply takes precedence for any day it covers. So a fresh Pi with a dead
+uplink, or one whose router is down for a week, keeps working — it is only the
+*changes* the mosque publishes that it misses.
+
+Regenerate it when the mosque publishes a new year, or when you point the repo
+at a different mosque:
+
+```sh
+./adhanctl bundle && git add data/ && git commit -m "refresh prayer times"
+```
+
+`data/mosque-4.json` holds the mosque id it was generated for. Point
+`MOSQUE_ID` at a different mosque and the file is ignored rather than played,
+so nobody ends up hearing Chemnitz times in another city.
 
 ## Troubleshooting
 
@@ -223,7 +281,8 @@ Run `./adhanctl doctor` first — it names the exact fix for anything it finds.
   returned as nulls — a 9-day request over new year returned 4 days. Records
   are matched by date, never by position.
 - **The cache survives outages.** A failed fetch leaves the existing window
-  alone; the device keeps working with what it has.
+  alone, and a year of times ships in the repo underneath it — see
+  [above](#it-keeps-working-without-internet).
 - **Bluetooth reconnects on its own**, backing off 5s → 5min. Echo devices drop
   the link when idle, so this happens routinely.
 - **5GHz WiFi is preferred.** The Pi's WiFi and Bluetooth share one 2.4GHz
@@ -287,8 +346,10 @@ Pi has both, plus a real filesystem, TLS trust store, NTP and systemd.
 
 ## Known gaps
 
-- One adhan file for all waqts unless `AUDIO_PATH_FAJR` is set.
-- Jummah is not used: the API exposes khutbah and iqamah for it, but no adhan.
+- One adhan file for all waqts unless `AUDIO_PATH_FAJR` is set. There is no
+  separate file for jummah.
 - `iftar` is ignored — it *is* the Maghrib adhan, which already plays.
-- Takaful Mosque's data currently ends at **2026-12-31**. After that the device
-  logs a warning and stays silent until the admin fills in 2027.
+- `suhur` is ignored: it is only sent during Ramadan, and it is not an adhan.
+- Takaful Mosque's data currently ends at **2026-12-31**, which is also where
+  the bundled fallback ends. After that the device logs a warning and stays
+  silent until the admin fills in 2027 — then run `./adhanctl bundle` again.

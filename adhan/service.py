@@ -13,7 +13,7 @@ from datetime import date, datetime
 from .alexa import AlexaDevice
 from .api import ApiError, ApiUnavailable
 from .bluetooth import BluetoothLink
-from .config import PRAYER_LABELS, Config
+from .config import Config
 from .player import Player
 from .schedule import Schedule
 
@@ -71,18 +71,17 @@ class AdhanService:
         that boots at noon would fire Fajr and Dhuhr back to back."""
         self._fired_date = now.date()
         self._fired = set()
-        entry = self._schedule.find(now.date())
-        if entry is not None:
-            for prayer in self._config.prayers:
-                at = entry.adhan.get(prayer)
-                if at is None:
-                    continue
-                when = datetime.combine(now.date(), at, tzinfo=now.tzinfo)
-                if (now - when).total_seconds() > self._config.fire_tolerance_seconds:
-                    self._fired.add(prayer)
+        slots = self._schedule.slots_for(now.date())
+        for slot in slots:
+            when = datetime.combine(now.date(), slot.at, tzinfo=now.tzinfo)
+            if (now - when).total_seconds() > self._config.fire_tolerance_seconds:
+                self._fired.add(slot.key)
         self._save_fired()
         log.info(
-            "new day %s; %d prayer(s) already past", now.date(), len(self._fired)
+            "new day %s: %s%s",
+            now.date(),
+            ", ".join(f"{s.label} {s.at:%H:%M}" for s in slots) or "nothing scheduled",
+            f" ({len(self._fired)} already past)" if self._fired else "",
         )
 
     # ------------------------------------------------------------- alexa
@@ -117,33 +116,26 @@ class AdhanService:
         if self._fired_date != now.date():
             self._roll_day(now)
 
-        entry = self._schedule.find(now.date())
-        if entry is None:
-            return
-
-        for prayer in self._config.prayers:
-            if prayer in self._fired:
+        for slot in self._schedule.slots_for(now.date()):
+            if slot.key in self._fired:
                 continue
-            at = entry.adhan.get(prayer)
-            if at is None:
-                continue
-            when = datetime.combine(now.date(), at, tzinfo=now.tzinfo)
+            when = datetime.combine(now.date(), slot.at, tzinfo=now.tzinfo)
             elapsed = (now - when).total_seconds()
             if elapsed < 0:
                 continue
             if elapsed > self._config.fire_tolerance_seconds:
-                log.info("%s missed by %.0fs; skipping", PRAYER_LABELS[prayer], elapsed)
-                self._fired.add(prayer)
+                log.info("%s missed by %.0fs; skipping", slot.label, elapsed)
+                self._fired.add(slot.key)
                 self._save_fired()
                 continue
 
-            log.info("%s adhan due", PRAYER_LABELS[prayer])
-            self._fired.add(prayer)
+            log.info("%s adhan due", slot.label)
+            self._fired.add(slot.key)
             self._save_fired()
             if not self._bluetooth.is_connected():
                 log.warning("speaker not connected; attempting to connect first")
                 self._bluetooth.connect()
-            self._player.play(prayer)
+            self._player.play(slot.key)
             return
 
     def _log_status(self, now: datetime) -> None:
@@ -154,12 +146,12 @@ class AdhanService:
         if upcoming is None:
             nxt = "nothing in the cached window"
         else:
-            prayer, when = upcoming
+            slot, when = upcoming
             delta = when - now
             hours, rem = divmod(int(delta.total_seconds()), 3600)
-            nxt = f"{PRAYER_LABELS[prayer]} in {hours}h {rem // 60}m"
+            nxt = f"{slot.label} in {hours}h {rem // 60}m"
         log.info(
-            "status: %d day(s) cached | speaker %s | next %s",
+            "status: %d day(s) known | speaker %s | next %s",
             len(self._schedule),
             "up" if self._bluetooth.is_connected() else "down",
             nxt,

@@ -14,6 +14,12 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENV_PATH = REPO_ROOT / ".env"
 
+# Defaults for everything but the API key, so a clone with only a key in .env
+# runs. These are Takaful Mosque, Chemnitz -- the mosque this was built for.
+DEFAULT_BASE_URL = "https://facemosque.com"
+DEFAULT_MOSQUE_ID = 4
+DEFAULT_TIMEZONE = "Europe/Berlin"
+
 # Every prayer the API exposes an adhan for, in the order the day runs. Jummah
 # is not here: the API gives khutbah and iqamah for it, but no adhan.
 ALL_PRAYERS: tuple[str, ...] = ("fajr", "dhuhr", "asr", "maghrib", "isha")
@@ -56,6 +62,7 @@ class Config:
 
     audio_path: Path
     audio_path_fajr: Path | None
+    fallback_path: Path
 
     bt_sink_mac: str
     bt_sink_name: str
@@ -66,6 +73,11 @@ class Config:
 
     state_dir: Path
     prayers: tuple[str, ...] = ALL_PRAYERS
+
+    # Which Friday prayer to play when the mosque holds more than one.
+    # None means all of them. See select_jummah().
+    jummah_choice: int | None = None
+
     schedule_days: int = 30
     refresh_interval_days: int = 3
 
@@ -123,22 +135,37 @@ class Config:
             )
             prayers = tuple(p for p in prayers if p in ALL_PRAYERS)
 
+        jummah_raw = optional("JUMMAH")
+        jummah_choice: int | None = None
+        if jummah_raw:
+            try:
+                jummah_choice = int(jummah_raw)
+            except ValueError:
+                warnings.append(
+                    f"JUMMAH={jummah_raw!r} is not a number; playing every jummah"
+                )
+            else:
+                if jummah_choice < 1:
+                    warnings.append(
+                        "JUMMAH must be 1 or higher; playing every jummah"
+                    )
+                    jummah_choice = None
+
         bt_mac = optional("BT_SINK_MAC").upper()
         if not bt_mac:
             warnings.append(
                 "BT_SINK_MAC is empty — run `./adhanctl pair` to select a speaker"
             )
 
-        # These four have no fallback, and are read in the order .env lists them
-        # so someone who has filled in nothing is told about the first blank
-        # rather than the last. MOSQUE_ID and TIMEZONE in particular belong to
-        # the installation, not to the code: guessing either one plays the adhan
-        # at the wrong time and says nothing about it.
-        base_url = get("EXPO_PUBLIC_API_BASE_URL").rstrip("/")
+        # The API key is the one thing with no default -- there is nothing
+        # sensible to guess. Everything else falls back to the values Takaful
+        # Mosque runs on, so a clone with only a key in it works. A wrong
+        # value is still an error: defaults are for blanks, not for typos.
         api_key = get("EXPO_PUBLIC_API_KEY")
-        mosque_id = as_int("MOSQUE_ID")
+        base_url = get("EXPO_PUBLIC_API_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+        mosque_id = as_int("MOSQUE_ID", str(DEFAULT_MOSQUE_ID))
 
-        zone_name = get("TIMEZONE")
+        zone_name = get("TIMEZONE", DEFAULT_TIMEZONE)
         try:
             timezone = ZoneInfo(zone_name)
         except (ZoneInfoNotFoundError, ValueError):
@@ -147,6 +174,12 @@ class Config:
                 "(e.g. Europe/Berlin, Asia/Dhaka)"
             ) from None
 
+        # Prayer times shipped in the repo, used when the API cannot be
+        # reached and there is no cache yet. Named per mosque so a different
+        # MOSQUE_ID never silently plays Takaful's times.
+        fallback_raw = optional("FALLBACK_PATH")
+        fallback_path = resolve(fallback_raw or f"data/mosque-{mosque_id}.json")
+
         return cls(
             base_url=base_url,
             api_key=api_key,
@@ -154,6 +187,7 @@ class Config:
             timezone=timezone,
             audio_path=audio_path,
             audio_path_fajr=audio_path_fajr,
+            fallback_path=fallback_path,
             bt_sink_mac=bt_mac,
             bt_sink_name=optional("BT_SINK_NAME", "Echo"),
             # Off unless asked for: current Echo firmware does not discover
@@ -165,6 +199,7 @@ class Config:
                 get("STATE_DIR", str(Path.home() / ".local/state/adhan"))
             ).expanduser(),
             prayers=prayers,
+            jummah_choice=jummah_choice,
             schedule_days=as_int("SCHEDULE_DAYS", "30"),
             refresh_interval_days=as_int("REFRESH_INTERVAL_DAYS", "3"),
             warnings=tuple(warnings),

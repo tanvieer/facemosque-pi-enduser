@@ -8,13 +8,13 @@ import shutil
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 
-from .api import ApiError, ApiUnavailable
+from .api import ApiError, ApiUnavailable, fetch_jummah, fetch_range
 from .bluetooth import BluetoothLink, pair, scan
 from .config import ENV_PATH, PRAYER_LABELS, Config
 from .player import Player, find_bluetooth_sink
-from .schedule import Schedule
+from .schedule import Schedule, select_jummah, write_bundle
 from .service import AdhanService
 
 OK, BAD, WARN = "  ok  ", " FAIL ", " warn "
@@ -30,16 +30,42 @@ def _run(*args: str, timeout: int = 15) -> str:
         return ""
 
 
-def _print_window(schedule: Schedule, prayers) -> None:
+def _print_window(
+    schedule: Schedule, config: Config, today: date, limit: int | None = None
+) -> None:
+    prayers = config.prayers
     header = f"{'date':<12} " + " ".join(f"{PRAYER_LABELS[p]:>8}" for p in prayers)
     print(header)
     print("-" * len(header))
-    for day in schedule.sorted_days:
+    # The bundled fallback runs from January, and nobody needs to be shown
+    # prayer times that have already happened.
+    days = [d for d in schedule.sorted_days if d.day >= today]
+    shown = days[:limit] if limit else days
+    for day in shown:
         cells = [
             f"{day.adhan[p].strftime('%H:%M'):>8}" if day.adhan.get(p) else f"{'--':>8}"
             for p in prayers
         ]
         print(f"{day.day.isoformat():<12} " + " ".join(cells))
+    if not shown:
+        print("(nothing from today onwards)")
+    elif len(shown) < len(days):
+        print(f"... and {len(days) - len(shown)} more day(s), to {days[-1].day}")
+    _print_jummah(schedule, config)
+
+
+def _print_jummah(schedule: Schedule, config: Config) -> None:
+    slots = schedule.jummah
+    if not slots:
+        return
+    playing = {s.key for s in select_jummah(slots, config.jummah_choice)}
+    print()
+    print("Jummah — on Fridays these replace the Dhuhr column above:")
+    for slot in slots:
+        mark = "plays" if slot.key in playing else "skipped"
+        print(f"  {slot.at.strftime('%H:%M')}  {slot.label:<28} {mark}")
+    if config.jummah_choice is None:
+        print("  (JUMMAH is blank, so every jummah plays)")
 
 
 # --------------------------------------------------------------- commands
@@ -75,6 +101,13 @@ def cmd_doctor(config: Config) -> int:
         config.audio_path.is_file(),
         fact=str(config.audio_path),
         hint=f"missing: {config.audio_path} (set AUDIO_PATH in .env)",
+    )
+    check(
+        "offline fallback times",
+        config.fallback_path.is_file(),
+        fact=config.fallback_path.name,
+        hint=f"no {config.fallback_path.name} — run ./adhanctl bundle",
+        fatal=False,
     )
 
     active = _run("systemctl", "--user", "is-active", "pipewire")
@@ -210,7 +243,48 @@ def cmd_fetch(config: Config, schedule: Schedule, today) -> int:
     except ApiUnavailable as exc:
         print(f"network unavailable: {exc}", file=sys.stderr)
         return 1
-    _print_window(schedule, config.prayers)
+    _print_window(schedule, config, today, limit=10)
+    return 0
+
+
+def cmd_bundle(config: Config, today: date) -> int:
+    """Write the offline fallback that ships in the repo.
+
+    A whole year per call is the most the API allows, so this asks for this
+    year and the next: whatever the mosque has entered for next year gets
+    picked up, and if they have entered nothing the range simply comes back
+    short. Re-run it and commit the result when the mosque publishes a new
+    year, or when you point the repo at a different mosque.
+    """
+    days = []
+    for year in (today.year, today.year + 1):
+        try:
+            got = fetch_range(config, date(year, 1, 1), date(year, 12, 31))
+        except ApiError as exc:
+            print(f"{year}: api error: {exc}", file=sys.stderr)
+            continue
+        except ApiUnavailable as exc:
+            print(f"network unavailable: {exc}", file=sys.stderr)
+            return 1
+        print(f"{year}: {len(got)} day(s)")
+        days.extend(got)
+
+    if not days:
+        print("nothing to bundle", file=sys.stderr)
+        return 1
+
+    try:
+        jummah = fetch_jummah(config)
+    except (ApiError, ApiUnavailable) as exc:
+        print(f"jummah unavailable ({exc}); bundling days only", file=sys.stderr)
+        jummah = []
+
+    path = write_bundle(config, days, jummah, today)
+    print(
+        f"wrote {path} — {len(days)} day(s) "
+        f"({days[0].day} .. {days[-1].day}), {len(jummah)} jummah"
+    )
+    print("commit it so a Pi with no internet still knows the times.")
     return 0
 
 
@@ -221,7 +295,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="adhanctl")
     parser.add_argument(
         "command",
-        choices=("run", "doctor", "pair", "fetch", "show", "next", "play", "stop"),
+        choices=(
+            "run", "doctor", "pair", "fetch", "bundle",
+            "show", "next", "play", "stop",
+        ),
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -256,22 +333,27 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "fetch":
         return cmd_fetch(config, schedule, now.date())
+    if args.command == "bundle":
+        return cmd_bundle(config, now.date())
     if args.command == "show":
         if not len(schedule):
-            print("cache is empty; run `./adhanctl fetch`")
+            print("nothing known; run `./adhanctl fetch`")
             return 1
-        print(f"cached {len(schedule)} day(s), fetched {schedule.fetched_on}")
-        _print_window(schedule, config.prayers)
+        print(
+            f"{len(schedule)} day(s) known, last fetched "
+            f"{schedule.fetched_on or 'never — using the bundled times'}"
+        )
+        _print_window(schedule, config, now.date(), limit=14)
         return 0
     if args.command == "next":
         upcoming = schedule.upcoming(now)
         if upcoming is None:
-            print("nothing scheduled in the cached window")
+            print("nothing scheduled in the known window")
             return 1
-        prayer, when = upcoming
+        slot, when = upcoming
         hours, rem = divmod(int((when - now).total_seconds()), 3600)
         print(
-            f"next: {PRAYER_LABELS[prayer]} at {when:%Y-%m-%d %H:%M} "
+            f"next: {slot.label} at {when:%Y-%m-%d %H:%M} "
             f"(in {hours}h {rem // 60}m)"
         )
         return 0

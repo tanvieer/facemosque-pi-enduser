@@ -61,6 +61,35 @@ class DayTimes:
         )
 
 
+@dataclass(frozen=True)
+class JummahSlot:
+    """One Friday prayer. A mosque can hold several, in different languages.
+
+    The API gives jummah a khutbah and an iqamah time but no adhan time, since
+    there is nothing to compute -- the adhan is called as the khatib takes the
+    minbar. So khutbah_time is when this plays, with iqamah_time as the
+    fallback for a mosque that only filled that one in.
+    """
+
+    order: int
+    at: time
+    label: str = ""
+
+    def to_json(self) -> dict:
+        return {
+            "order": self.order,
+            "at": self.at.strftime("%H:%M:%S"),
+            "label": self.label,
+        }
+
+    @classmethod
+    def from_json(cls, blob: dict) -> "JummahSlot | None":
+        at = _parse_time(blob.get("at"))
+        if at is None:
+            return None
+        return cls(order=int(blob.get("order", 0)), at=at, label=blob.get("label", ""))
+
+
 def _parse_time(value: object) -> time | None:
     """'HH:MM:SS' -> time. None for null/blank/malformed.
 
@@ -158,6 +187,39 @@ def fetch_range(config: Config, start: date, end: date) -> list[DayTimes]:
     days = [d for d in (_parse_day(b) for b in days_blob) if d is not None]
     days.sort(key=lambda d: d.day)
 
+    _warn_about_gaps(days, start, end)
+    return days
+
+
+def fetch_jummah(config: Config) -> list[JummahSlot]:
+    """GET /jummah — the mosque's Friday prayers, in the order they are held.
+
+    Deliberately a separate call: the /range response carries no jummah at all,
+    only the single-date and today responses do, and those would mean 30 more
+    requests for data that is identical on every Friday.
+    """
+    payload = _get(config, f"/mosques/{config.mosque_id}/jummah")
+    slots: list[JummahSlot] = []
+    for blob in (payload.get("data") or {}).get("jummah") or []:
+        if not isinstance(blob, dict) or not blob.get("is_active", True):
+            continue
+        at = _parse_time(blob.get("khutbah_time")) or _parse_time(blob.get("iqamah_time"))
+        if at is None:
+            log.warning("jummah entry %r has no usable time; skipping", blob.get("id"))
+            continue
+        labels = blob.get("labels") or {}
+        slots.append(
+            JummahSlot(
+                order=int(blob.get("order") or 0),
+                at=at,
+                label=str(labels.get("en") or "").strip(),
+            )
+        )
+    slots.sort(key=lambda s: (s.order, s.at))
+    return slots
+
+
+def _warn_about_gaps(days: list[DayTimes], start: date, end: date) -> None:
     requested = (end - start).days + 1
     if len(days) < requested:
         missing = sorted(
