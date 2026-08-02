@@ -234,26 +234,37 @@ adhan. Better the normal adhan than a silent Friday.
 ## It keeps working without internet
 
 A full year of prayer times is committed in [`data/`](data/), so a Pi that
-cannot reach the API still calls the adhan. The order of preference is:
+cannot reach the API still calls the adhan. Three layers, most recent first:
 
-1. what was fetched in the last few days (`~/.local/state/adhan/schedule.json`)
-2. the bundled year in `data/mosque-<id>.json`
+| | Source | Covers | Refreshed |
+| --- | --- | --- | --- |
+| 1 | `~/.local/state/adhan/schedule.json` | next 30 days | every 3 days |
+| 2 | `~/.local/state/adhan/fallback.json` | this year and next | **1st of each month** |
+| 3 | `data/mosque-<id>.json` (in the repo) | the year it was built | when you run `bundle` |
 
-The bundle is read-only and never overwritten by the service; the live fetch
-simply takes precedence for any day it covers. So a fresh Pi with a dead
-uplink, or one whose router is down for a week, keeps working — it is only the
-*changes* the mosque publishes that it misses.
+Layer 2 is the one that keeps a long-running device honest. **It is rebuilt on
+the 1st of every month, and if the device is offline that day it stays due and
+rebuilds within five minutes of the connection coming back.** Missing the
+window is the failure that matters — this is the copy that has to be right
+when nothing else works.
 
-Regenerate it when the mosque publishes a new year, or when you point the repo
-at a different mosque:
+It is written to the state directory rather than over the committed file, so
+`git pull` never conflicts with a file the service rewrote by itself.
+
+Layer 3 is the baseline a fresh clone starts from, and updating it is a
+deliberate act: run it and commit when the mosque publishes a new year, or
+when you point the repo at a different mosque.
 
 ```sh
 ./adhanctl bundle && git add data/ && git commit -m "refresh prayer times"
 ```
 
-`data/mosque-4.json` holds the mosque id it was generated for. Point
-`MOSQUE_ID` at a different mosque and the file is ignored rather than played,
-so nobody ends up hearing Chemnitz times in another city.
+Both bundles record the mosque id they were built for. Point `MOSQUE_ID` at a
+different mosque and the file is ignored rather than played, so nobody ends up
+hearing Chemnitz times in another city.
+
+`./adhanctl show` prints when the fallback was last built and whether a
+rebuild is due.
 
 ## Troubleshooting
 

@@ -10,11 +10,11 @@ import sys
 import time
 from datetime import date, datetime
 
-from .api import ApiError, ApiUnavailable, fetch_jummah, fetch_range
+from .api import ApiError, ApiUnavailable
 from .bluetooth import BluetoothLink, pair, scan
 from .config import ENV_PATH, PRAYER_LABELS, Config
 from .player import Player, find_bluetooth_sink
-from .schedule import Schedule, select_jummah, write_bundle
+from .schedule import Schedule, fetch_years, select_jummah, write_bundle
 from .service import AdhanService
 
 OK, BAD, WARN = "  ok  ", " FAIL ", " warn "
@@ -248,43 +248,32 @@ def cmd_fetch(config: Config, schedule: Schedule, today) -> int:
 
 
 def cmd_bundle(config: Config, today: date) -> int:
-    """Write the offline fallback that ships in the repo.
+    """Rewrite the offline fallback that ships in the repo.
 
-    A whole year per call is the most the API allows, so this asks for this
-    year and the next: whatever the mosque has entered for next year gets
-    picked up, and if they have entered nothing the range simply comes back
-    short. Re-run it and commit the result when the mosque publishes a new
-    year, or when you point the repo at a different mosque.
+    The running service maintains its own copy monthly, in the state
+    directory. This one is the baseline a fresh clone starts from, so it is a
+    deliberate act: run it and commit the result when the mosque publishes a
+    new year, or when you point the repo at a different mosque.
     """
-    days = []
-    for year in (today.year, today.year + 1):
-        try:
-            got = fetch_range(config, date(year, 1, 1), date(year, 12, 31))
-        except ApiError as exc:
-            print(f"{year}: api error: {exc}", file=sys.stderr)
-            continue
-        except ApiUnavailable as exc:
-            print(f"network unavailable: {exc}", file=sys.stderr)
-            return 1
-        print(f"{year}: {len(got)} day(s)")
-        days.extend(got)
+    try:
+        days, jummah = fetch_years(config, today)
+    except ApiError as exc:
+        print(f"api error: {exc}", file=sys.stderr)
+        return 1
+    except ApiUnavailable as exc:
+        print(f"network unavailable: {exc}", file=sys.stderr)
+        return 1
 
     if not days:
         print("nothing to bundle", file=sys.stderr)
         return 1
 
-    try:
-        jummah = fetch_jummah(config)
-    except (ApiError, ApiUnavailable) as exc:
-        print(f"jummah unavailable ({exc}); bundling days only", file=sys.stderr)
-        jummah = []
-
-    path = write_bundle(config, days, jummah, today)
+    path = write_bundle(config.fallback_path, config.mosque_id, days, jummah, today)
     print(
         f"wrote {path} — {len(days)} day(s) "
         f"({days[0].day} .. {days[-1].day}), {len(jummah)} jummah"
     )
-    print("commit it so a Pi with no internet still knows the times.")
+    print("commit it so a fresh clone with no internet still knows the times.")
     return 0
 
 
@@ -342,6 +331,11 @@ def main(argv: list[str] | None = None) -> int:
         print(
             f"{len(schedule)} day(s) known, last fetched "
             f"{schedule.fetched_on or 'never — using the bundled times'}"
+        )
+        due = " (rebuild due)" if schedule.needs_bundle_refresh(now.date()) else ""
+        print(
+            f"offline fallback built {schedule.fallback_generated or 'never'}{due}, "
+            f"rebuilt monthly"
         )
         _print_window(schedule, config, now.date(), limit=14)
         return 0

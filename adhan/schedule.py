@@ -9,12 +9,20 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
-from .api import ApiError, ApiUnavailable, DayTimes, JummahSlot, fetch_jummah, fetch_range
+from .api import (
+    ApiError,
+    ApiUnavailable,
+    DayTimes,
+    JummahSlot,
+    fetch_jummah,
+    fetch_range,
+)
 from .config import PRAYER_LABELS, Config
 
 log = logging.getLogger(__name__)
 
 STATE_FILENAME = "schedule.json"
+FALLBACK_FILENAME = "fallback.json"
 
 # Bumped when the shape of schedule.json changes, so an older cache is refetched
 # instead of quietly missing whatever the new version added.
@@ -51,23 +59,45 @@ def select_jummah(slots: list[Slot], choice: int | None) -> list[Slot]:
 
 
 def write_bundle(
-    config: Config,
+    path: Path,
+    mosque_id: int,
     days: list[DayTimes],
     jummah: list[JummahSlot],
     generated: date,
-) -> "Path":
-    """Write the offline fallback that ships in the repo. See `adhanctl bundle`."""
-    path = config.fallback_path
+) -> Path:
+    """Write a year of prayer times to disk as an offline fallback.
+
+    Two callers: `adhanctl bundle`, which writes the copy committed to the
+    repo, and the service, which keeps its own copy fresh in the state
+    directory. Same format either way.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     blob = {
         "version": STATE_VERSION,
-        "mosque_id": config.mosque_id,
+        "mosque_id": mosque_id,
         "generated": generated.isoformat(),
         "days": [d.to_json() for d in days],
         "jummah": [j.to_json() for j in jummah],
     }
-    path.write_text(json.dumps(blob, indent=1) + "\n", encoding="utf-8")
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(blob, indent=1) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
     return path
+
+
+def fetch_years(config: Config, today: date) -> tuple[list[DayTimes], list[JummahSlot]]:
+    """A year of days either side of the turn, plus the jummah times.
+
+    The API refuses a range over 366 days, so this year and next are two
+    separate calls. Next year is usually empty -- the admin has not filled it
+    in yet -- and that is fine; the point is that the moment they do, the very
+    next rebuild picks it up and December stops being a cliff edge.
+    """
+    days: list[DayTimes] = []
+    for year in (today.year, today.year + 1):
+        days.extend(fetch_range(config, date(year, 1, 1), date(year, 12, 31)))
+    jummah = fetch_jummah(config)
+    return days, jummah
 
 
 class Schedule:
@@ -80,6 +110,7 @@ class Schedule:
         self._jummah: list[JummahSlot] = []
         self._fallback: dict[date, DayTimes] = {}
         self._fallback_jummah: list[JummahSlot] = []
+        self.fallback_generated: date | None = None
         self._version = STATE_VERSION
         self.fetched_on: date | None = None
 
@@ -89,22 +120,26 @@ class Schedule:
     def path(self):
         return self._config.state_dir / STATE_FILENAME
 
-    def _load_fallback(self) -> None:
-        """Read the prayer times shipped in the repo.
+    @property
+    def fallback_path(self) -> Path:
+        """The service's own copy of the offline fallback.
 
-        This is what makes a Pi with no internet still call the adhan: a whole
-        year of times committed alongside the code, consulted whenever the live
-        cache has nothing for the day in question. It is never written to.
+        Kept out of the repo deliberately: the committed file is the baseline
+        a fresh clone starts from, and rewriting it at runtime would turn
+        every `git pull` into a conflict over a file nobody edited by hand.
         """
-        path = self._config.fallback_path
+        return self._config.state_dir / FALLBACK_FILENAME
+
+    def _read_bundle(
+        self, path: Path
+    ) -> tuple[dict[date, DayTimes], list[JummahSlot], date | None]:
         try:
             blob = json.loads(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
-            log.info("no bundled prayer times at %s", path)
-            return
+            return {}, [], None
         except (OSError, ValueError) as exc:
-            log.warning("bundled prayer times unreadable (%s); ignoring", exc)
-            return
+            log.warning("%s unreadable (%s); ignoring it", path.name, exc)
+            return {}, [], None
 
         found = blob.get("mosque_id")
         if found != self._config.mosque_id:
@@ -114,25 +149,55 @@ class Schedule:
                 found,
                 self._config.mosque_id,
             )
-            return
+            return {}, [], None
 
+        days: dict[date, DayTimes] = {}
         for entry in blob.get("days", []):
             try:
                 day = DayTimes.from_json(entry)
             except (KeyError, TypeError, ValueError):
                 continue
-            self._fallback[day.day] = day
-        self._fallback_jummah = [
+            days[day.day] = day
+        jummah = [
             slot
             for slot in (JummahSlot.from_json(e) for e in blob.get("jummah", []))
             if slot is not None
         ]
-        log.info(
-            "bundled fallback: %d day(s) and %d jummah from %s",
-            len(self._fallback),
-            len(self._fallback_jummah),
-            path.name,
-        )
+        generated = None
+        try:
+            generated = date.fromisoformat(blob["generated"])
+        except (KeyError, TypeError, ValueError):
+            pass
+        return days, jummah, generated
+
+    def _load_fallback(self) -> None:
+        """Read the prayer times to fall back on when the API is unreachable.
+
+        Two sources, in order: the year committed to the repo, then whatever
+        the service has since rebuilt for itself. This is what makes a Pi with
+        no internet still call the adhan.
+        """
+        self._fallback = {}
+        self._fallback_jummah = []
+        self.fallback_generated = None
+        for path in (self._config.fallback_path, self.fallback_path):
+            days, jummah, generated = self._read_bundle(path)
+            if not days:
+                continue
+            self._fallback.update(days)
+            if jummah:
+                self._fallback_jummah = jummah
+            if generated and (
+                self.fallback_generated is None or generated > self.fallback_generated
+            ):
+                self.fallback_generated = generated
+            log.info(
+                "fallback: %d day(s), %d jummah from %s (built %s)",
+                len(days),
+                len(jummah),
+                path.name,
+                generated or "unknown",
+            )
 
     def load(self) -> None:
         self._load_fallback()
@@ -259,6 +324,48 @@ class Schedule:
             days[-1].day.isoformat(),
             len(days),
             len(self._jummah),
+        )
+        return True
+
+    # ------------------------------------------------- offline fallback
+
+    def needs_bundle_refresh(self, today: date) -> bool:
+        """Is the offline fallback due for a rebuild?
+
+        Once a month, on the 1st. Phrased as "was it built in an earlier
+        month" rather than "is today the 1st" on purpose: a device that was
+        offline on the 1st stays due, and rebuilds the moment it next reaches
+        the API. Missing the window entirely is the failure mode that matters
+        here -- this is the copy that has to be right when nothing else works.
+        """
+        if self.fallback_generated is None:
+            return True
+        built = self.fallback_generated
+        return (built.year, built.month) < (today.year, today.month)
+
+    def refresh_bundle(self, today: date) -> bool:
+        """Rebuild the offline fallback from the API. Raises on network error.
+
+        Written to the state directory rather than over the committed file --
+        see `fallback_path`. On failure the existing fallback is untouched.
+        """
+        days, jummah = fetch_years(self._config, today)
+        if not days:
+            log.warning("bundle rebuild returned no days; keeping the old fallback")
+            return False
+
+        write_bundle(
+            self.fallback_path,
+            self._config.mosque_id,
+            days,
+            jummah or self._fallback_jummah,
+            today,
+        )
+        self._load_fallback()
+        log.info(
+            "offline fallback rebuilt: %d day(s) through %s",
+            len(days),
+            days[-1].day.isoformat(),
         )
         return True
 

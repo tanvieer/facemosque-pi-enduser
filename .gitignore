@@ -22,6 +22,7 @@ venv/
 *.log
 schedule.json
 fired.json
+fallback.json
 
 # ---- editors and os -------------------------------------------------------
 .vscode/

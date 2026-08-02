@@ -22,6 +22,9 @@ log = logging.getLogger(__name__)
 TICK_SECONDS = 1.0
 STATUS_INTERVAL = 900  # 15 min
 FETCH_RETRY_SECONDS = 300
+# How often to ask whether the monthly fallback rebuild is due. Cheap when it
+# is not -- a date comparison -- so hourly is plenty to catch the 1st.
+BUNDLE_CHECK_SECONDS = 3600
 
 
 class AdhanService:
@@ -35,6 +38,7 @@ class AdhanService:
         self._fired_date: date | None = None
         self._fired: set[str] = set()
         self._next_fetch = 0.0
+        self._next_bundle = 0.0
         self._next_status = 0.0
         self._running = True
 
@@ -111,6 +115,28 @@ class AdhanService:
         except ApiError as exc:
             log.error("api error: %s", exc)
             self._next_fetch = time.monotonic() + FETCH_RETRY_SECONDS
+
+    def _maybe_rebundle(self, now: datetime) -> None:
+        """Keep the offline fallback current: rebuilt on the 1st of the month,
+        or as soon after that as the device can reach the API. Two big requests
+        once a month, so it is guarded by its own timer rather than the
+        three-day one."""
+        if self._player.is_playing():
+            return
+        if time.monotonic() < self._next_bundle:
+            return
+        if not self._schedule.needs_bundle_refresh(now.date()):
+            self._next_bundle = time.monotonic() + BUNDLE_CHECK_SECONDS
+            return
+        try:
+            self._schedule.refresh_bundle(now.date())
+            self._next_bundle = time.monotonic() + BUNDLE_CHECK_SECONDS
+        except ApiUnavailable as exc:
+            log.warning("offline fallback not rebuilt (%s); retrying later", exc)
+            self._next_bundle = time.monotonic() + FETCH_RETRY_SECONDS
+        except ApiError as exc:
+            log.error("offline fallback not rebuilt: %s", exc)
+            self._next_bundle = time.monotonic() + FETCH_RETRY_SECONDS
 
     def _maybe_fire(self, now: datetime) -> None:
         if self._fired_date != now.date():
@@ -200,6 +226,7 @@ class AdhanService:
 
             self._player.reap()
             self._maybe_refresh(now)
+            self._maybe_rebundle(now)
             self._maybe_fire(now)
             self._log_status(now)
 
